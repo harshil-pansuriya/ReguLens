@@ -1,21 +1,30 @@
 import re
-from loguru import logger
-import aiofiles
-from typing import AsyncGenerator, TypedDict, List
 from pathlib import Path
+import aiofiles
+import asyncio
+from asyncpg import Pool
+from loguru import logger
+from typing import AsyncGenerator, TypedDict, List, Dict
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-
+from app.db.crud import insert_dpdp_act
+from app.core.config import settings
+from app.service.embedding import embedding_service
 class SectionData(TypedDict):
     number: str
     title: str
     content: List[str]
     
-async def read_file(file_path: str) -> AsyncGenerator[str, None]:
+async def read_file(file_path: str) -> AsyncGenerator[str, None]:       # Stream lines from file
     async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
         async for line in f:
             yield line.strip()
             
-async def parse_dpd_act(file_path: str) -> None:
+            
+async def validate_section(section: SectionData) -> bool:       #validate section data 
+    return bool(section['number'] and section['content'])
+            
+async def parse_dpd_act(file_path: str, pool: Pool) -> None:
     
     if not Path(file_path).exists():
         logger.error(f'DPDP Act file not found {file_path}')
@@ -31,6 +40,11 @@ async def parse_dpd_act(file_path: str) -> None:
     current_chapter = "Unknown"
     current_section: SectionData | None = None
     section_content: List[str] = []
+    batch_vectors: List[Dict] = []
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size ,
+        chunk_overlap=settings.chunk_overlap
+    )
     
     async for line in read_file(file_path):
         if not line:
@@ -38,11 +52,14 @@ async def parse_dpd_act(file_path: str) -> None:
         if chapter_regex.match(line):
             current_chapter = line.title()
             continue
-        section_match = section_regex.match(line)
         
+        section_match = section_regex.match(line)
         if section_match:
-            if current_section:
-                logger.debug(f"Found section: {current_section['number']}")
+            if current_section and validate_section(current_section):
+                await store_section(
+                    pool, current_chapter,current_section, section_content, text_splitter, batch_vectors
+                )
+                
             current_section = SectionData(
                 number=f"{section_match.group(1)} {section_match.group(2)}".title(),
                 title=section_match.group(3).strip().title() if section_match.group(3) else "",
@@ -54,5 +71,55 @@ async def parse_dpd_act(file_path: str) -> None:
         if current_section:
             section_content.append(line)
             
-    if current_section:
-        logger.debug(f'Found Section: {current_section['number']}')
+    if current_section and validate_section(current_section):
+        await store_section(
+            pool, current_chapter, current_section, section_content, text_splitter, batch_vectors
+        )
+        
+    if batch_vectors:
+        await asyncio.gather(
+            *[
+                embedding_service.store_embeddings(
+                    texts=[item["text"]],
+                    metadata=[item["metadata"]],
+                    namespace="dpdp_act"
+                )
+                for item in batch_vectors
+            ]
+        )
+        logger.info(f"Stored {len(batch_vectors)} embeddings for DPDP Act")
+    
+    logger.info('Completed DPDP Act parsing and storage')
+        
+async def store_section(pool: Pool, chapter: str, section: SectionData, content_lines: List[str], 
+                        splitter: RecursiveCharacterTextSplitter, batch_vectors: List[Dict]) -> None:
+    content = "\n".join(content_lines).strip()
+    if not content:
+        return
+    
+    section_id= await insert_dpdp_act( pool=pool, section_number=section["number"],
+                                    section_title=section["title"], chapter=chapter, content=content,
+                                    is_chunk=False, chunk_index=None )
+    
+    logger.debug(f"Stored section {section['number']} with ID: {section_id}")
+    
+    chunks= splitter.splitext(content)
+    for idx, chunk in enumerate (chunks, 1):
+        if not chunk.strip():
+            continue
+        chunk_id= await insert_dpdp_act( pool=pool, section_number=section["number"], 
+                                        section_title=section["title"],chapter=chapter, content=chunk, 
+                                        is_chunk=True, chunk_index=idx )
+        batch_vectors.append({
+            "text" : chunk,
+            "metadata" : {
+                "id" : chunk_id,
+                "section_number": section['number'],
+                "chapter": chapter,
+                "chunk_index": idx,
+                "content": chunk[:500],
+                "type": "dpdp_act"
+            }
+        })
+        
+        logger.debug(f"Stored chunk {idx} for section {section['number']} with ID: {chunk_id}") 
