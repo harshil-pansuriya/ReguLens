@@ -4,7 +4,6 @@ from datetime import datetime
 
 Base = declarative_base()
 
-
 class DPDPAct(Base):
     
     __tablename__ = 'dpdp_act'
