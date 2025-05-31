@@ -32,6 +32,3 @@ async def closed_db(app: FastAPI) -> None:
         await app.state_db_pool.close()
         logger.info('Database connection pool closed.')
     
-    
-            
-    
