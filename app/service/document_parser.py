@@ -1,4 +1,6 @@
 import re
+import fitz
+from docx import Document
 from pathlib import Path
 import aiofiles
 import asyncio
@@ -7,7 +9,7 @@ from loguru import logger
 from typing import AsyncGenerator, TypedDict, List, Dict
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from app.db.crud import insert_dpdp_act
+from app.db.crud import insert_dpdp_act, insert_document
 from app.core.config import settings
 from app.service.embedding import embedding_service
 class SectionData(TypedDict):
@@ -19,7 +21,6 @@ async def read_file(file_path: str) -> AsyncGenerator[str, None]:       # Stream
     async with aiofiles.open(file_path, 'r', encoding='utf-8') as f:
         async for line in f:
             yield line.strip()
-            
             
 async def validate_section(section: SectionData) -> bool:       #validate section data 
     return bool(section['number'] and section['content'])
@@ -123,3 +124,58 @@ async def store_section(pool: Pool, chapter: str, section: SectionData, content_
         })
         
         logger.debug(f"Stored chunk {idx} for section {section['number']} with ID: {chunk_id}") 
+        
+        
+        
+async def parse_user_doc(file_path: str, pool: Pool) -> List[int]:
+    file = Path(file_path)
+    if not file.exists():
+        raise FileNotFoundError(f"Document not found: {file_path}")
+
+    logger.info(f"Parsing document: {file.name}")
+    text = ""
+    if file.suffix == '.pdf':
+        with fitz.open(file) as doc:
+            for page in doc:
+                text += page.get_text()
+    elif file.suffix == '.docx':
+        doc = Document(file)
+        text = "\n".join(para.text for para in doc.paragraphs)
+    else:
+        raise ValueError("Only PDF or DOCX supported")
+
+    if not text.strip():
+        raise ValueError(f"Document is empty: {file.name}")
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.chunk_size or 1000,
+        chunk_overlap=settings.chunk_overlap or 200
+    )
+    chunks = text_splitter.split_text(text)
+    document_ids = []
+    batch_vectors = []
+
+    for idx, chunk in enumerate(chunks, 1):
+        if not chunk.strip():
+            continue
+        document_id = await insert_document(pool, file.name, chunk)
+        document_ids.append(document_id)
+        batch_vectors.append({
+            "text": chunk,
+            "metadata": {
+                "id": document_id,
+                "filename": file.name,
+                "chunk_index": idx,
+                "type": "document"
+            }
+        })
+
+    if batch_vectors:
+        await embedding_service.store_embeddings(
+            texts=[item["text"] for item in batch_vectors],
+            metadata=[item["metadata"] for item in batch_vectors],
+            namespace="documents"
+        )
+
+    logger.info(f"Stored {len(document_ids)} chunks for {file.name}")
+    return document_ids
