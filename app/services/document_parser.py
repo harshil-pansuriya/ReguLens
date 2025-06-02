@@ -9,9 +9,10 @@ from loguru import logger
 from typing import AsyncGenerator, TypedDict, List, Dict
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 
-from app.db.crud import insert_dpdp_act, insert_document
+from app.repository.document import insert_dpdp_act, insert_document
 from app.core.config import settings
-from app.service.embedding import embedding_service
+from app.services.embedding import embedding_service
+
 class SectionData(TypedDict):
     number: str
     title: str
@@ -24,6 +25,40 @@ async def read_file(file_path: str) -> AsyncGenerator[str, None]:       # Stream
             
 async def validate_section(section: SectionData) -> bool:       #validate section data 
     return bool(section['number'] and section['content'])
+
+async def store_section(pool: Pool, chapter: str, section: SectionData, content_lines: List[str], 
+                        splitter: RecursiveCharacterTextSplitter, batch_vectors: List[Dict]) -> None:
+    content = "\n".join(content_lines).strip()
+    if not content:
+        return
+    
+    section_id= await insert_dpdp_act( pool=pool, section_number=section["number"],
+                                    section_title=section["title"], chapter=chapter, content=content,
+                                    is_chunk=False, chunk_index=None )
+    
+    logger.debug(f"Stored section {section['number']} with ID: {section_id}")
+    
+    chunks= splitter.splitext(content)
+    for idx, chunk in enumerate (chunks, 1):
+        if not chunk.strip():
+            continue
+        chunk_id= await insert_dpdp_act( pool=pool, section_number=section["number"], 
+                                        section_title=section["title"],chapter=chapter, content=chunk, 
+                                        is_chunk=True, chunk_index=idx )
+        batch_vectors.append({
+            "text" : chunk,
+            "metadata" : {
+                "id" : chunk_id,
+                "section_number": section['number'],
+                "chapter": chapter,
+                "chunk_index": idx,
+                "content": chunk[:500],
+                "type": "dpdp_act"
+            }
+        })
+        
+        logger.debug(f"Stored chunk {idx} for section {section['number']} with ID: {chunk_id}") 
+
             
 async def parse_dpd_act(file_path: str, pool: Pool) -> None:
     
@@ -91,41 +126,7 @@ async def parse_dpd_act(file_path: str, pool: Pool) -> None:
         logger.info(f"Stored {len(batch_vectors)} embeddings for DPDP Act")
     
     logger.info('Completed DPDP Act parsing and storage')
-        
-async def store_section(pool: Pool, chapter: str, section: SectionData, content_lines: List[str], 
-                        splitter: RecursiveCharacterTextSplitter, batch_vectors: List[Dict]) -> None:
-    content = "\n".join(content_lines).strip()
-    if not content:
-        return
     
-    section_id= await insert_dpdp_act( pool=pool, section_number=section["number"],
-                                    section_title=section["title"], chapter=chapter, content=content,
-                                    is_chunk=False, chunk_index=None )
-    
-    logger.debug(f"Stored section {section['number']} with ID: {section_id}")
-    
-    chunks= splitter.splitext(content)
-    for idx, chunk in enumerate (chunks, 1):
-        if not chunk.strip():
-            continue
-        chunk_id= await insert_dpdp_act( pool=pool, section_number=section["number"], 
-                                        section_title=section["title"],chapter=chapter, content=chunk, 
-                                        is_chunk=True, chunk_index=idx )
-        batch_vectors.append({
-            "text" : chunk,
-            "metadata" : {
-                "id" : chunk_id,
-                "section_number": section['number'],
-                "chapter": chapter,
-                "chunk_index": idx,
-                "content": chunk[:500],
-                "type": "dpdp_act"
-            }
-        })
-        
-        logger.debug(f"Stored chunk {idx} for section {section['number']} with ID: {chunk_id}") 
-        
-        
         
 async def parse_user_doc(file_path: str, pool: Pool) -> List[int]:
     file = Path(file_path)

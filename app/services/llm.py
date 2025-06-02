@@ -15,7 +15,9 @@ class LLMService:
         )
         self.prompt_template = PromptTemplate(
             input_variables=["document_text", "regulation_text"],
-            template="""You are a compliance auditor specializing in India's DPDP Act. Analyze the company privacy policy against the provided DPDP Act sections. Identify specific compliance gaps and provide actionable recommendations. If fully compliant, state so clearly. Respond in this exact format with bullet points:
+            template="""You are a compliance auditor specializing in India's DPDP Act. Analyze the company privacy policy against the provided DPDP Act sections. 
+                        Identify specific compliance gaps and provide actionable recommendations. 
+                        If fully compliant, state so clearly. Respond in this exact format with bullet points:
 
                 - Compliance Status: True or False
                 - Gaps: List specific issues or "None"
@@ -79,3 +81,5 @@ class LLMService:
             "gaps": gaps,
             "suggestions": suggestions
         }
+        
+llm_service= LLMService()

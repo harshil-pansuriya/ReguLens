@@ -25,10 +25,10 @@ async def get_db_pool() -> Pool:
     
     
 async def init_db(app: FastAPI) -> None:
-    app.state_db_pool= await get_db_pool()  #initialize db connection pool for FastAPI App
+    app.state.db_pool= await get_db_pool()  #initialize db connection pool for FastAPI App
     
 async def closed_db(app: FastAPI) -> None:
-    if hasattr(app.state, 'db_pool') and app.state_db_pool:
-        await app.state_db_pool.close()
+    if hasattr(app.state, 'db_pool') and app.state.db_pool:
+        await app.state.db_pool.close()
         logger.info('Database connection pool closed.')
     

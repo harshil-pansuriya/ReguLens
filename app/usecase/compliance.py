@@ -2,8 +2,8 @@ from langgraph.graph import StateGraph, END
 from typing import TypedDict, List, Dict
 from asyncpg import Pool
 from pinecone import Pinecone, ServerlessSpec
-from app.service.embedding import EmbeddingService
-from app.service.llm import LLMService
+from app.services.embedding import embedding_service
+from app.services.llm import llm_service
 from app.repository.document import fetch_document_chunks, insert_audit
 from app.core.config import settings
 from loguru import logger
@@ -17,7 +17,6 @@ class ComplianceState(TypedDict):
     pool: Pool
 
 async def retrieve_node(state: ComplianceState) -> ComplianceState:
-    """Retrieve document text and matching DPDP Act sections."""
     pc = Pinecone(api_key=settings.pinecone_api_key)
     index_name = "compliguard-index"
     if index_name not in pc.list_indexes().names():
@@ -37,7 +36,7 @@ async def retrieve_node(state: ComplianceState) -> ComplianceState:
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=500)
     state["document_text"] = "\n".join(text_splitter.split_text(full_text)[:2])
 
-    embeddings = await EmbeddingService.generate_embeddings([state["document_text"]])
+    embeddings = await embedding_service.generate_embeddings([state["document_text"]])
     index = pc.Index(index_name)
     query_result = index.query(
         vector=embeddings[0],
@@ -66,7 +65,7 @@ async def analyze_node(state: ComplianceState) -> ComplianceState:
         f"{match['section_number']}: {match['content']}" for match in state["matched_sections"]
     ) or "No relevant sections found"
 
-    result = await LLMService.analyze_compliance(
+    result = await llm_service.analyze_compliance(
         document_text=state["document_text"],
         regulation_text=regulation_text
     )
