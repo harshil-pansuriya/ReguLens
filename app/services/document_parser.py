@@ -38,7 +38,7 @@ async def store_section(pool: Pool, chapter: str, section: SectionData, content_
     
     logger.debug(f"Stored section {section['number']} with ID: {section_id}")
     
-    chunks= splitter.splitext(content)
+    chunks= splitter.split_text(content)
     for idx, chunk in enumerate (chunks, 1):
         if not chunk.strip():
             continue
@@ -60,7 +60,7 @@ async def store_section(pool: Pool, chapter: str, section: SectionData, content_
         logger.debug(f"Stored chunk {idx} for section {section['number']} with ID: {chunk_id}") 
 
             
-async def parse_dpd_act(file_path: str, pool: Pool) -> None:
+async def parse_dpdp_act(file_path: str, pool: Pool) -> None:
     
     if not Path(file_path).exists():
         logger.error(f'DPDP Act file not found {file_path}')

@@ -17,7 +17,7 @@ class AuditResponse(BaseModel):
     document_id: int
     filename: str
     compliance_status: bool
-    dpdp_section_analyzed: str
+    dpdp_sections_analyzed: str
     compliance_gaps: str
     recommendations: str
 

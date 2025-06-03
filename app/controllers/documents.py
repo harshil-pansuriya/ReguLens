@@ -13,12 +13,12 @@ class DocumentController:
         self.llm_service = llm_service
         self.compliance_graph = build_compliance_graph()
 
-    async def upload_document(self, file_path: str, pool: Pool) -> List[int]:
+    async def upload_document(self, file_path: str, pool: Pool) -> List[int]:  # document upload
         logger.info(f"Processing upload for {file_path}")
         document_ids = await upload_document(file_path, pool)
         return document_ids
 
-    async def audit_document(self, document_id: int, pool: Pool) -> Dict:
+    async def audit_document(self, document_id: int, pool: Pool) -> Dict:   #audit document 
         logger.info(f"Auditing document_id: {document_id}")
         result = await self.compliance_graph.ainvoke(
             {
